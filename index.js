@@ -10,6 +10,8 @@ const mongoose = require('mongoose');
 const Joi = require('joi');// Not needed since it is required in the schema file
 const ejsMate = require('ejs-mate')
 const session = require('express-session')
+const MongoStore = require('connect-mongo');
+
 const flash = require('connect-flash')
 const {campgroundSchema, reviewSchema} = require('./schemas.js')// JOI schema
 const methodOverride = require('method-override');
@@ -20,13 +22,21 @@ const Review = require('./models/review')
 const passport = require('passport')
 const localStrategy = require('passport-local')
 const User = require('./models/user')
+const helmet = require('helmet');
+
+const mongoSanitize = require('express-mongo-sanitize');
 
 
 const userRoutes = require('./routes/users')
 const campgroundsRoutes = require('./routes/campground.js') //Requiring the restructured campground routes
 const reviewsRoutes = require('./routes/reviews.js')//Requiring the restructured review routes
 
-mongoose.connect('mongodb://127.0.0.1:27017/yelp-camp', {
+const dbUrl = process.env.DB_URL || 'mongodb://127.0.0.1:27017/yelp-camp';
+
+
+//process.env.DB_URL
+
+mongoose.connect(dbUrl, {
     useNewUrlParser: true,
     //useCreateIndex: true,
     useUnifiedTopology: true,
@@ -46,13 +56,32 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({extended: true}))//middleware
 app.use(methodOverride('_method'));
 app.use(express.static(path.join(__dirname,'public')))
+app.use(mongoSanitize());
+
+const secret = process.env.SECRET || 'deting';
+
+
+const store = MongoStore.create({
+    mongoUrl: dbUrl,
+    touchAfter: 24 * 60 * 60,
+    crypto: {
+        secret: 'thisshouldbeabettersecret!'
+    }
+});
+
+store.on('error', (e) => {
+    console.log('SESSION STORE ERROR!')
+})
 
 const sessionConfig ={
-    secret : 'deting',
+    store,
+    name: 'session',
+    secret,
     resave: false,
     saveUninitialized: true,
     cookie: {
         httpOnly: true,
+        //secure: true,
         expires: Date.now() + 1000 * 60 * 60 * 24 * 7,
         maxAge: 1000 * 60 * 60 * 24 * 7
     }//cookie options
@@ -61,6 +90,11 @@ const sessionConfig ={
 
 app.use(session(sessionConfig))//calling the session
 app.use(flash());
+app.use(helmet({contentSecurityPolicy: false}));
+
+
+
+
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -93,7 +127,9 @@ app.use('/', userRoutes)
 app.use('/campgrounds', campgroundsRoutes)//To use the restructured campground routes
 app.use('/campgrounds/:id/reviews', reviewsRoutes)//To use the restructures reviews routes
 
-
+app.get('/', (req,res) => {
+    res.render('home.ejs')
+})
 
 app.all('*',(req,res,next) => {
     next(new expressError('Page Not Found', 404))
